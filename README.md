@@ -19,7 +19,7 @@
 ## Usage
 required args: wav, block_size
 ```shell
-ntrSWAV.py [-h] [--temp-file-dir TEMP_FILE_DIR] [--lookahead N]
+ntrWavTool.py [-h] [--temp-file-dir TEMP_FILE_DIR] [--lookahead N]
                   [--skip-conversion] [--loop-start LOOP_START]
                   [--shadow-buffer-size SHADOW_BUFFER_SIZE]
                   wav [swav] block_size
