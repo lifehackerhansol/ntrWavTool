@@ -16,7 +16,6 @@ import wave
 import ndspy
 import ndspy.soundWave
 
-ADPCM_XQ_PATH = Path('adpcm-xq')
 DEFAULT_LOOKAHEAD = 3  # same as adpcm-xq itself
 
 
@@ -55,12 +54,12 @@ def do_wav_mangling(in_wav: Path, out_wav: Path, block_size_samples: int) -> Non
                 out_wav.writeframes(block)
 
 
-def run_adpcm_xq(in_wav: Path, out_wav: Path, *,
-                 lookahead: Optional[int] = None, block_size_pow: Optional[int] = None) -> None:
+def run_adpcm_xq(in_wav: Path, out_wav: Path, adpcm_xq: Path,
+                 *, lookahead: Optional[int] = None, block_size_pow: Optional[int] = None) -> None:
     """
     Helper function to run adpcm-xq
     """
-    cmd = [os.getcwd() + os.path.sep + str(ADPCM_XQ_PATH)]
+    cmd = [os.getcwd() + os.path.sep + str(adpcm_xq)]
     cmd.append('-e')  # "encode only (fail on WAV file already ADPCM)"
     cmd.append('-q')  # "quiet mode (display errors only)"
     cmd.append('-y')  # "overwrite outfile if it exists"
@@ -140,6 +139,8 @@ def main(argv: List[str] = None) -> None:
                         help='adpcm block size (must be a power of 2)')
     parser.add_argument('--temp-file-dir', type=Path,
                         help='location of dir to put temp files generated during conversion process')
+    parser.add_argument('--adpcm-xq', type=Path,
+                        help='location of the adpcm-xq executable')
     parser.add_argument('--lookahead', type=int, metavar='N', default=DEFAULT_LOOKAHEAD,
                         help='adpcm-xq lookahead value (larger values make encoding exponentially slower)')
     parser.add_argument('--skip-conversion', action='store_true',
@@ -161,6 +162,10 @@ def main(argv: List[str] = None) -> None:
     else:
         if not os.path.exists(temp_file_dir):
             os.mkdir(temp_file_dir)
+
+    adpcm_xq_path = args.adpcm_xq
+    if adpcm_xq_path is None:
+        adpcm_xq_path = Path('adpcm-xq')
 
     if bin(args.block_size).count('1') != 1:
         raise ValueError('block size must be a power of 2')
@@ -209,7 +214,7 @@ def main(argv: List[str] = None) -> None:
 
         if not args.skip_conversion:
             do_wav_mangling(mono_input_wav, mono_input_wav_mangled, block_size_samples)
-            run_adpcm_xq(mono_input_wav_mangled, mono_adpcm_wav,
+            run_adpcm_xq(mono_input_wav_mangled, mono_adpcm_wav, adpcm_xq_path,
                          lookahead=args.lookahead, block_size_pow=round(math.log2(args.block_size)))
 
     print('Creating SWAV...')
