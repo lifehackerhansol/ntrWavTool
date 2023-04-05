@@ -72,8 +72,10 @@ def run_adpcm_xq(in_wav: Path, out_wav: Path, adpcm_xq: Path,
 
     cmd += [str(in_wav), str(out_wav)]
 
-    print(cmd)
-    subprocess.run(cmd, capture_output=True)
+    result = subprocess.run(cmd, stdout=subprocess.PIPE)
+    output = str(result.stdout).replace('b\'\'', '').strip()
+    if len(output) > 3:
+        print(output)
 
 
 def create_swav_from_adpcm_wavs(wav_path: str, *, loop_start: Optional[int] = None) -> ndspy.soundWave:
@@ -81,7 +83,6 @@ def create_swav_from_adpcm_wavs(wav_path: str, *, loop_start: Optional[int] = No
     Build a SWAV from a path to an IMA-ADPCM WAV
     """
     data = b''
-    print(wav_path)
     with Path(wav_path).open('rb') as f:
         f.seek(0, io.SEEK_END)
         file_size = f.tell()
@@ -112,7 +113,6 @@ def create_swav_from_adpcm_wavs(wav_path: str, *, loop_start: Optional[int] = No
         total_data_bytes = int.from_bytes(f.read(4), 'little')
 
         while f.tell() < file_size:
-            print('reading block')
             block = f.read(block_size)
             data = block
 
@@ -217,7 +217,7 @@ def main(argv: List[str] = None) -> None:
             run_adpcm_xq(mono_input_wav_mangled, mono_adpcm_wav, adpcm_xq_path,
                          lookahead=args.lookahead, block_size_pow=round(math.log2(args.block_size)))
 
-    print('Creating SWAV...')
+    print('Creating SWAV: %s' % str(swav_path))
     swav = create_swav_from_adpcm_wavs(mono_adpcm_wavs[0], loop_start=args.loop_start)
     swav.saveToFile(swav_path, updateTime=True, updateTotalLength=True)
 
