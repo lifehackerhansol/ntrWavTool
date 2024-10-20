@@ -124,10 +124,67 @@ def create_swav_from_adpcm_wavs(wav_path: str, *, loop_start: Optional[int] = No
     return swav
 
 
-def main(argv: List[str] = None) -> None:
+def convert(wav_path, swav_path, temp_file_dir, adpcm_xq_path, block_size, lookahead, skip_conversion, loop_start, shadow_buffer_size):
     """
     Main function
     """
+
+    if bin(block_size).count('1') != 1:
+        raise ValueError('block size must be a power of 2')
+    block_size_samples = (block_size - 4) * 2
+
+    # Split wav if needed
+    with wave.open(str(wav_path), 'r') as in_wav:
+        num_channels = in_wav.getnchannels()
+        num_samples = in_wav.getnframes()
+
+    # Enforce restrictions
+    if shadow_buffer_size:
+        multiple_of = block_size_samples * shadow_buffer_size
+
+        def enforce_is_multiple_of(value: int, name: str, multiple_of: int) -> None:
+            if value % multiple_of:
+                prev = (value // multiple_of) * multiple_of
+                next = prev + multiple_of
+                raise ValueError(
+                    f'with block size {block_size:x} and shadow-buffer size {shadow_buffer_size}, {name} must be a multiple of {multiple_of} samples, which {value} is not.\nMaybe consider changing it to {prev} (-{value - prev}) or {next} (+{next - value})?')
+
+        enforce_is_multiple_of(num_samples, 'total length', multiple_of)
+        if loop_start:
+            enforce_is_multiple_of(loop_start, 'loop start', multiple_of)
+
+    if num_channels == 1:
+        mono_input_wavs = [wav_path]
+
+    elif num_channels == 2:
+        mono_input_wavs = [
+            wav_path.parent / f'{wav_path.stem}_L.wav',
+            wav_path.parent / f'{wav_path.stem}_R.wav']
+
+        if not skip_conversion:
+            split_stereo_wav(wav_path, *mono_input_wavs)
+
+    else:
+        raise ValueError(f'More than 2 channels in a wav?? {num_channels}')
+
+    mono_adpcm_wavs = []
+
+    for mono_input_wav in mono_input_wavs:
+        mono_input_wav_mangled = temp_file_dir / f'{mono_input_wav.stem}_mangled_{block_size:x}.wav'
+        mono_adpcm_wav = temp_file_dir / f'{mono_input_wav.stem}_adpcm_{block_size:x}_{lookahead}.wav'
+        mono_adpcm_wavs.append(mono_adpcm_wav)
+
+        if not skip_conversion:
+            do_wav_mangling(mono_input_wav, mono_input_wav_mangled, block_size_samples)
+            run_adpcm_xq(mono_input_wav_mangled, mono_adpcm_wav, adpcm_xq_path,
+                         lookahead=lookahead, block_size_pow=round(math.log2(block_size)))
+
+    print('Creating SWAV: %s' % str(swav_path))
+    swav = create_swav_from_adpcm_wavs(mono_adpcm_wavs[0], loop_start=loop_start)
+    swav.saveToFile(swav_path, updateTime=True, updateTotalLength=True)
+
+
+def commandline(argv: List[str] = None) -> None:
     parser = argparse.ArgumentParser(
         description='swav-xq: WAV -> SWAV converter powered by ndspy and adpcm-xq')
 
@@ -167,60 +224,8 @@ def main(argv: List[str] = None) -> None:
     if adpcm_xq_path is None:
         adpcm_xq_path = Path('adpcm-xq')
 
-    if bin(args.block_size).count('1') != 1:
-        raise ValueError('block size must be a power of 2')
-    block_size_samples = (args.block_size - 4) * 2
-
-    # Split wav if needed
-    with wave.open(str(args.wav), 'r') as in_wav:
-        num_channels = in_wav.getnchannels()
-        num_samples = in_wav.getnframes()
-
-    # Enforce restrictions
-    if args.shadow_buffer_size:
-        multiple_of = block_size_samples * args.shadow_buffer_size
-
-        def enforce_is_multiple_of(value: int, name: str, multiple_of: int) -> None:
-            if value % multiple_of:
-                prev = (value // multiple_of) * multiple_of
-                next = prev + multiple_of
-                raise ValueError(
-                    f'with block size {args.block_size:x} and shadow-buffer size {args.shadow_buffer_size}, {name} must be a multiple of {multiple_of} samples, which {value} is not.\nMaybe consider changing it to {prev} (-{value - prev}) or {next} (+{next - value})?')
-
-        enforce_is_multiple_of(num_samples, 'total length', multiple_of)
-        if args.loop_start:
-            enforce_is_multiple_of(args.loop_start, 'loop start', multiple_of)
-
-    if num_channels == 1:
-        mono_input_wavs = [args.wav]
-
-    elif num_channels == 2:
-        mono_input_wavs = [
-            args.wav.parent / f'{args.wav.stem}_L.wav',
-            args.wav.parent / f'{args.wav.stem}_R.wav']
-
-        if not args.skip_conversion:
-            split_stereo_wav(args.wav, *mono_input_wavs)
-
-    else:
-        raise ValueError(f'More than 2 channels in a wav?? {num_channels}')
-
-    mono_adpcm_wavs = []
-
-    for mono_input_wav in mono_input_wavs:
-        mono_input_wav_mangled = temp_file_dir / f'{mono_input_wav.stem}_mangled_{args.block_size:x}.wav'
-        mono_adpcm_wav = temp_file_dir / f'{mono_input_wav.stem}_adpcm_{args.block_size:x}_{args.lookahead}.wav'
-        mono_adpcm_wavs.append(mono_adpcm_wav)
-
-        if not args.skip_conversion:
-            do_wav_mangling(mono_input_wav, mono_input_wav_mangled, block_size_samples)
-            run_adpcm_xq(mono_input_wav_mangled, mono_adpcm_wav, adpcm_xq_path,
-                         lookahead=args.lookahead, block_size_pow=round(math.log2(args.block_size)))
-
-    print('Creating SWAV: %s' % str(swav_path))
-    swav = create_swav_from_adpcm_wavs(mono_adpcm_wavs[0], loop_start=args.loop_start)
-    swav.saveToFile(swav_path, updateTime=True, updateTotalLength=True)
+    convert(args.wav, swav_path, temp_file_dir, adpcm_xq_path, args.block_size, args.lookahead, args.skip_conversion, args.loop_start, args.shadow_buffer_size)
 
 
 if __name__ == '__main__':
-    main()
+    commandline()
